@@ -29,29 +29,40 @@ function groupIntoRounds(messages: Message[]): Round[] {
     return rounds;
 }
 
+/** 默认 token 预算上限（参考 pico DEFAULT_TOTAL_BUDGET=12000 字符，换算约 4000 tokens） */
+const DEFAULT_TOTAL_BUDGET = 4000;
+
 /** 做三层裁剪的入口类 */
 export class ContextManager {
     private model: ModelClient;
     private recentRounds: number;
     private midRounds: number;
+    private totalBudget: number;
     private summaryCache = new Map<string, string>();
     /** 最近一次 build() 的裁剪统计（公开，供 API 返回面试数据） */
-    public lastStats: { before: number; after: number; rounds: number } | null = null;
+    public lastStats: { before: number; after: number; rounds: number; compressed: boolean } | null = null;
 
     constructor(
         model: ModelClient,
         recentRounds: number = 3,
         midRounds: number = 3,
+        totalBudget: number = DEFAULT_TOTAL_BUDGET,
     ) {
         this.model = model;
         this.recentRounds = recentRounds;
         this.midRounds = midRounds;
+        this.totalBudget = totalBudget;
     }
 
-    /** 对消息列表做三层渐进压缩 */
+    /** 对消息列表做三层渐进压缩（只有超过 token 预算时才触发，参考 pico while len(prompt) > total_budget） */
     async build(messages: Message[]): Promise<Message[]> {
-        // 裁剪前的 token
         const beforeTokens = estimateTokensForMessages(messages);
+
+        // 未超过预算 → 不压缩，原样返回
+        if (beforeTokens <= this.totalBudget) {
+            this.lastStats = { before: beforeTokens, after: beforeTokens, rounds: 0, compressed: false };
+            return messages;
+        }
 
         // 固定保留 system + 首条 user
         const pinned = [messages[0], messages[1]];
@@ -107,7 +118,7 @@ export class ContextManager {
         }
         // 裁剪后的 token
         const afterTokens = estimateTokensForMessages(result);
-        this.lastStats = { before: beforeTokens, after: afterTokens, rounds: total };
+        this.lastStats = { before: beforeTokens, after: afterTokens, rounds: total, compressed: true };
         return result;
     }
 
