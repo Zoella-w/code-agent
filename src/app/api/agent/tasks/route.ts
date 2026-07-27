@@ -31,6 +31,9 @@ export async function POST(request: NextRequest) {
                 verifyResultPassed: body.verifyResultPassed,
                 toolSteps: body.toolSteps,
                 status: body.status,
+                reviewMode: body.reviewMode,
+                prUrl: body.prUrl,
+                githubToken: body.githubToken,
             },
             create: {
                 title: body.title,
@@ -42,6 +45,9 @@ export async function POST(request: NextRequest) {
                 verifyResultPassed: body.verifyResultPassed,
                 toolSteps: body.toolSteps ?? [],
                 status: body.status ?? "idle",
+                reviewMode: body.reviewMode ?? "code",
+                prUrl: body.prUrl ?? "",
+                githubToken: body.githubToken ?? "",
             },
         });
         return NextResponse.json({ task }, { status: 201 });

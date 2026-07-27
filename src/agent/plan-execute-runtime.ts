@@ -65,6 +65,7 @@ export default async function planAndExecute(
     executor: ToolExecutor,
     model: ModelClient,
     signal?: AbortSignal,
+    onToolCall?: (event: { step: number; toolName: string; args: Record<string, unknown>; observation?: string }) => void,
 ): Promise<string> {
     // Phase 1: Planning — 生成步骤列表
     const plan: string[] = await generatePlan(task, registry, model, signal);
@@ -85,6 +86,7 @@ export default async function planAndExecute(
             executor,
             model,
             signal,
+            onToolCall,
         );
         stepResults.push(result);
     }
@@ -104,6 +106,7 @@ async function executeStep(
     executor: ToolExecutor,
     model: ModelClient,
     signal?: AbortSignal,
+    onToolCall?: (event: { step: number; toolName: string; args: Record<string, unknown>; observation?: string }) => void,
 ): Promise<StepResult> {
     // 拼装 system prompt：工具列表 + 当前步骤上下文（包含前面步骤上下文）
     const prevText = previousResults.length > 0
@@ -140,7 +143,10 @@ async function executeStep(
             };
         }
         if (parsed.type === "tool_call") {
+            onToolCall?.({ step: stepCount, toolName: parsed.toolName, args: parsed.args });
+            await new Promise<void>(r => setTimeout(r, 0));
             const toolResult = await executor.execute(parsed.toolName, parsed.args);
+            onToolCall?.({ step: stepCount, toolName: parsed.toolName, args: parsed.args, observation: toolResult.content });
             messages.push({
                 role: "user",
                 content: `Observation: ${toolResult.content}`,

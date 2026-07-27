@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { createOrchestrateStream } from "@/agent/orchestrate";
 
 export async function POST(request: NextRequest) {
-    const { prUrl, githubToken } = await request.json();
+    const { prUrl, githubToken, verify } = await request.json();
 
     if (!prUrl || typeof prUrl !== "string") {
         return new Response(JSON.stringify({ error: "prUrl 为必填字段" }), { status: 400 });
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     const stream = createOrchestrateStream({
         prompt: reviewPrompt,
         mode: "react",
-        verify: true,
+        verify: verify ?? false,
     });
 
     return new Response(stream, {

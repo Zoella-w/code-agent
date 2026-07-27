@@ -12,6 +12,7 @@ async function runActor(
     model: ModelClient,
     reflection: string,
     signal?: AbortSignal,
+    onToolCall?: (event: { step: number; toolName: string; args: Record<string, unknown>; observation?: string }) => void,
 ): Promise<{ answer: string; messages: Message[] }> {
     let systemPrompt = buildSystemPrompt(registry);
     if (reflection) {
@@ -42,7 +43,10 @@ async function runActor(
             return { answer: parsed.content, messages };
         }
         if (parsed.type === "tool_call") {
+            onToolCall?.({ step: stepCount, toolName: parsed.toolName, args: parsed.args });
+            await new Promise<void>(r => setTimeout(r, 0));
             const toolResult = await executor.execute(parsed.toolName, parsed.args);
+            onToolCall?.({ step: stepCount, toolName: parsed.toolName, args: parsed.args, observation: toolResult.content });
             messages.push({
                 role: "user",
                 content: `Observation: ${toolResult.content}`,
@@ -135,6 +139,7 @@ export default async function reflectAndExecute(
     executor: ToolExecutor,
     model: ModelClient,
     signal?: AbortSignal,
+    onToolCall?: (event: { step: number; toolName: string; args: Record<string, unknown>; observation?: string }) => void,
 ): Promise<{ answer: string; rounds: number }> {
     let reflection = "";  // 上一轮的反思文本，首轮为空
     let round = 0;
@@ -145,7 +150,7 @@ export default async function reflectAndExecute(
         round++;
         if (signal?.aborted) throw new Error("用户中断");
         // 1. Actor 执行，拿结果和对话历史
-        const { answer, messages } = await runActor(task, registry, executor, model, reflection, signal);
+        const { answer, messages } = await runActor(task, registry, executor, model, reflection, signal, onToolCall);
         lastAnswer = answer;
 
         // 2. Evaluator 评估：合格就直接返回

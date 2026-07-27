@@ -1,6 +1,9 @@
 "use client";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import Editor from "react-simple-code-editor";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 // 定义这个组件需要父组件传什么数据给它
 interface InputPanelProps {
@@ -43,7 +46,13 @@ export default function InputPanel({
     onStop,
 }: InputPanelProps) {
     const isRunning = status === "running";
-    const canSend = (reviewMode === "pr" ? prUrl.trim() : code.trim()) && !isRunning;
+    const canSend = (reviewMode === "pr" ? prUrl.trim() : (code.trim() || question.trim())) && !isRunning;
+
+    const highlight = (text: string) => (
+        <SyntaxHighlighter language="typescript" style={oneLight} customStyle={{ margin: 0, padding: "0.5rem 0.75rem", minHeight: "100%", fontSize: "0.8rem", background: "transparent" }}>
+            {text}
+        </SyntaxHighlighter>
+    );
 
     return (
         <div className="h-full flex flex-col p-4 gap-4">
@@ -132,12 +141,19 @@ export default function InputPanel({
                     <label className="text-sm font-medium text-muted-foreground">
                         代码
                     </label>
-                    <Textarea
+                    <Editor
                         value={code}
-                        onChange={(e) => onCodeChange(e.target.value)}
+                        onValueChange={onCodeChange}
+                        highlight={highlight}
                         placeholder="在此粘贴需要审查的代码..."
-                        className="flex-1 resize-none font-mono text-sm"
                         disabled={isRunning}
+                        className="flex-1 border rounded-md overflow-auto"
+                        style={{
+                            fontFamily: '"Fira Code", "Fira Mono", monospace',
+                            fontSize: "0.8rem",
+                            background: "#fafafa",
+                        }}
+                        textareaClassName="outline-none"
                     />
                 </div>
             )}

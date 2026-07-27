@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAgent } from "@/hooks/useAgent";
 import InputPanel from "@/components/InputPanel";
 import TaskSidebar from "@/components/TaskSidebar";
@@ -12,8 +12,11 @@ export default function Home() {
   const { state, dispatch, sendOrchestrate, stopAgent, sendPRReview, createTask, switchTask, deleteTask, loadTasks } = useAgent();
   const [traceOpen, setTraceOpen] = useState(false);
   const [evalOpen, setEvalOpen] = useState(false);
+  const initialized = useRef(false);
 
   useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
     loadTasks().then((count) => {
       if (count === 0) {
         createTask();
@@ -37,6 +40,9 @@ export default function Home() {
           verifyResultPassed: state.verifyResult?.passed ?? null,
           toolSteps: state.toolSteps,
           status: "done",
+          reviewMode: state.reviewMode,
+          prUrl: state.prUrl,
+          githubToken: state.githubToken,
         }),
       });
     }

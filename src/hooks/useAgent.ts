@@ -27,6 +27,9 @@ export interface Task {
     verifyResult: VerifyResult | null;
     toolSteps: ToolStep[];
     status: AgentStatus;
+    reviewMode: "code" | "pr";
+    prUrl: string;
+    githubToken: string;
 }
 
 export interface AgentState {
@@ -67,6 +70,7 @@ type AgentAction =
     | { type: "NEW_TASK"; payload: string }
     | { type: "SWITCH_TASK"; payload: string }
     | { type: "DELETE_TASK"; payload: string }
+    | { type: "SYNC_CURRENT_TASK" }
     | { type: "LOAD_TASKS"; payload: Task[] }
     | { type: "SET_REVIEW_MODE"; payload: "code" | "pr" }
     | { type: "SET_PR_URL"; payload: string }
@@ -95,15 +99,31 @@ function reducer(state: AgentState, action: AgentAction): AgentState {
                 return { ...state, verifyAnswer: state.verifyAnswer + action.payload };
             }
             return { ...state, mainAnswer: state.mainAnswer + action.payload };
-        case "TOOL_START":
-            return {
-                ...state,
-                toolSteps: [...state.toolSteps, { step: action.payload.step, toolName: action.payload.toolName, args: action.payload.args, observation: action.payload.observation }],
-            };
+        case "TOOL_START": {
+            const existingIdx = state.toolSteps.findIndex((s) => s.step === action.payload.step);
+            const entry = { step: action.payload.step, toolName: action.payload.toolName, args: action.payload.args, observation: action.payload.observation };
+            if (existingIdx >= 0) {
+                const updated = [...state.toolSteps];
+                updated[existingIdx] = entry;
+                return { ...state, toolSteps: updated };
+            }
+            return { ...state, toolSteps: [...state.toolSteps, entry] };
+        }
         case "SET_VERIFY_RESULT":
             return { ...state, verifyResult: action.payload };
         case "FINISH":
             return { ...state, status: "done" };
+        case "SYNC_CURRENT_TASK": {
+            if (!state.currentTaskId) return state;
+            return {
+                ...state,
+                tasks: state.tasks.map((t) =>
+                    t.id === state.currentTaskId
+                        ? { ...t, code: state.code, question: state.question, mode: state.mode, mainAnswer: state.mainAnswer, verifyAnswer: state.verifyAnswer, verifyResult: state.verifyResult, toolSteps: state.toolSteps, status: "done" as const, reviewMode: state.reviewMode, prUrl: state.prUrl, githubToken: state.githubToken }
+                        : t
+                ),
+            };
+        }
         case "STOP":
             return { ...state, status: "idle" };
         case "NEW_TASK": {
@@ -112,7 +132,7 @@ function reducer(state: AgentState, action: AgentAction): AgentState {
             if (state.currentTaskId) {
                 updatedTasks = state.tasks.map((t) =>
                     t.id === state.currentTaskId
-                        ? { ...t, code: state.code, question: state.question, mode: state.mode }
+                        ? { ...t, code: state.code, question: state.question, mode: state.mode, mainAnswer: state.mainAnswer, verifyAnswer: state.verifyAnswer, verifyResult: state.verifyResult, toolSteps: state.toolSteps, status: state.status, reviewMode: state.reviewMode, prUrl: state.prUrl, githubToken: state.githubToken }
                         : t
                 );
             }
@@ -127,6 +147,9 @@ function reducer(state: AgentState, action: AgentAction): AgentState {
                 verifyResult: null,
                 toolSteps: [],
                 status: "idle",
+                reviewMode: state.reviewMode,
+                prUrl: "",
+                githubToken: "",
             };
             return {
                 ...state,
@@ -156,6 +179,9 @@ function reducer(state: AgentState, action: AgentAction): AgentState {
                 verifyResult: target.verifyResult,
                 toolSteps: target.toolSteps,
                 status: target.status,
+                reviewMode: target.reviewMode,
+                prUrl: target.prUrl,
+                githubToken: target.githubToken,
             };
         }
         case "DELETE_TASK": {
@@ -176,12 +202,26 @@ function reducer(state: AgentState, action: AgentAction): AgentState {
             return { ...state, prUrl: action.payload };
         case "SET_GITHUB_TOKEN":
             return { ...state, githubToken: action.payload };
-        case "LOAD_TASKS":
+        case "LOAD_TASKS": {
+            const firstTask = action.payload[0];
+            if (!firstTask) return { ...state, tasks: [], currentTaskId: null };
             return {
                 ...state,
                 tasks: action.payload,
-                currentTaskId: action.payload[0]?.id ?? null,
+                currentTaskId: firstTask.id,
+                code: firstTask.code,
+                question: firstTask.question,
+                mode: firstTask.mode,
+                mainAnswer: firstTask.mainAnswer,
+                verifyAnswer: firstTask.verifyAnswer,
+                verifyResult: firstTask.verifyResult,
+                toolSteps: firstTask.toolSteps,
+                status: firstTask.status,
+                reviewMode: firstTask.reviewMode,
+                prUrl: firstTask.prUrl,
+                githubToken: firstTask.githubToken,
             };
+        }
         default:
             return state;
     }
@@ -245,11 +285,23 @@ export function useAgent() {
     };
 
     const sendOrchestrate = async () => {
-        if (!state.code.trim()) return;
+        if (!state.code.trim() && !state.question.trim()) return;
         if (!state.question.trim()) {
             dispatch({ type: "SET_QUESTION", payload: DEFAULT_QUESTION });
         }
         const promptQuestion = state.question.trim() || DEFAULT_QUESTION;
+
+        // 确保有任务：初始化异步未完成时用户可能抢先发送
+        if (!state.currentTaskId) {
+            const res = await fetch("/api/agent/tasks", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: `代码审查 #1`, mode: state.mode }),
+            });
+            const data = await res.json();
+            dispatch({ type: "NEW_TASK", payload: data.task.id });
+        }
+
         dispatch({ type: "SEND" });
 
         const controller = new AbortController();
@@ -298,6 +350,7 @@ export function useAgent() {
                                 dispatch({ type: "SET_VERIFY_RESULT", payload: event.verifyResult });
                             }
                             dispatch({ type: "FINISH" });
+                            dispatch({ type: "SYNC_CURRENT_TASK" });
                             break;
                     }
                 }
@@ -351,6 +404,17 @@ export function useAgent() {
 
     const sendPRReview = async () => {
         if (!state.prUrl.trim()) return;
+
+        if (!state.currentTaskId) {
+            const res = await fetch("/api/agent/tasks", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: `代码审查 #1`, mode: state.mode }),
+            });
+            const data = await res.json();
+            dispatch({ type: "NEW_TASK", payload: data.task.id });
+        }
+
         dispatch({ type: "SEND" });
 
         const controller = new AbortController();
@@ -363,6 +427,7 @@ export function useAgent() {
                 body: JSON.stringify({
                     prUrl: state.prUrl,
                     githubToken: state.githubToken || undefined,
+                    verify: state.verify,
                 }),
                 signal: controller.signal,
             });
@@ -402,6 +467,7 @@ export function useAgent() {
                                 dispatch({ type: "SET_VERIFY_RESULT", payload: event.verifyResult });
                             }
                             dispatch({ type: "FINISH" });
+                            dispatch({ type: "SYNC_CURRENT_TASK" });
                             break;
                     }
                 }

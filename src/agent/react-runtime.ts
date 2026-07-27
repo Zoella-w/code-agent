@@ -25,6 +25,7 @@ export default async function runReActLoop(
     model: ModelClient,
     externalCtx?: ContextManager,
     signal?: AbortSignal,
+    onToolCall?: (event: { step: number; toolName: string; args: Record<string, unknown>; observation?: string }) => void,
 ): Promise<string> {
     // 1. 组装 system prompt
     const systemPrompt = buildSystemPrompt(registry);
@@ -57,7 +58,13 @@ export default async function runReActLoop(
 
         if (parsed.type === "tool_call") {
             parseFailCount = 0;
+            // 执行前通知前端：Agent 正在做什么
+            onToolCall?.({ step: stepCount, toolName: parsed.toolName, args: parsed.args });
+            // 让出控制权，确保浏览器先渲染「执行中」状态
+            await new Promise<void>(r => setTimeout(r, 0));
             const toolResult = await executor.execute(parsed.toolName, parsed.args);
+            // 执行后通知前端：工具执行结果
+            onToolCall?.({ step: stepCount, toolName: parsed.toolName, args: parsed.args, observation: toolResult.content });
             memory.add({
                 role: "user",
                 content: `Observation: ${toolResult.content}`,

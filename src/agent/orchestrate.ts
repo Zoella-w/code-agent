@@ -45,14 +45,15 @@ export async function dispatch(
     executor: ToolExecutor,
     model: ModelClient,
     signal?: AbortSignal,
+    onToolCall?: (event: { step: number; toolName: string; args: Record<string, unknown>; observation?: string }) => void,
 ): Promise<string> {
     switch (mode) {
         case "react":
-            return await runReActLoop(prompt, registry, executor, model, undefined, signal);
+            return await runReActLoop(prompt, registry, executor, model, undefined, signal, onToolCall);
         case "plan-execute":
-            return await planAndExecute(prompt, registry, executor, model, signal);
+            return await planAndExecute(prompt, registry, executor, model, signal, onToolCall);
         case "reflection": {
-            const result = await reflectAndExecute(prompt, registry, executor, model, signal);
+            const result = await reflectAndExecute(prompt, registry, executor, model, signal, onToolCall);
             return result.answer;
         }
         default:
@@ -87,7 +88,10 @@ export function createOrchestrateStream(
 
                 // 执行阶段
                 sendSSE(controller, { type: "phase", phase: "executing" });
-                const mainAnswer = await dispatch(mode, prompt, registry, executor, model, signal);
+                const onToolCall = (event: { step: number; toolName: string; args: Record<string, unknown>; observation?: string }) => {
+                    sendSSE(controller, { type: "step", ...event });
+                };
+                const mainAnswer = await dispatch(mode, prompt, registry, executor, model, signal, onToolCall);
                 sendSSE(controller, { type: "delta", text: mainAnswer });
 
                 // 验证阶段（可选）

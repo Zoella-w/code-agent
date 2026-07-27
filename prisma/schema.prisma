@@ -18,6 +18,9 @@ model Task {
   verifyResultPassed  Boolean?
   toolSteps           Json     @default("[]")
   status              String   @default("idle")
+  reviewMode          String   @default("code")
+  prUrl               String   @default("")
+  githubToken         String   @default("")
   createdAt           DateTime @default(now())
 }
 

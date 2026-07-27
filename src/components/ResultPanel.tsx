@@ -1,5 +1,8 @@
 "use client";
 import type { VerifyResult } from "@/hooks/useAgent";
+import { getToolMeta, formatArgs } from "./tool-icons";
+import EvalLabeler from "./EvalLabeler";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 interface ResultPanelProps {
     mainAnswer: string;
@@ -7,7 +10,7 @@ interface ResultPanelProps {
     verifyResult: VerifyResult | null;
     status: string;
     phase: string | null;
-    toolSteps: { step: number; toolName: string }[];
+    toolSteps: { step: number; toolName: string; args?: Record<string, unknown>; observation?: string }[];
     reviewMode: "code" | "pr";
     onOpenTrace: () => void;
     onOpenEval: () => void;
@@ -50,19 +53,29 @@ export default function ResultPanel({
 
                 {status === "running" && (
                     <div>
-                        {toolSteps.map((step) => (
-                            <div key={step.step} className="text-xs text-gray-500 mb-1">
-                                ✅ {step.toolName}
-                            </div>
-                        ))}
+                        <div className="space-y-1 mb-3">
+                            {toolSteps.map((s) => {
+                                const meta = getToolMeta(s.toolName);
+                                const argText = formatArgs(s.args ?? {});
+                                const isExecuting = !s.observation;
+                                return (
+                                    <div key={s.step} className={`text-xs rounded px-2 py-1 flex items-center gap-1.5 ${isExecuting ? "bg-blue-50 text-blue-600 animate-pulse" : "bg-green-50 text-green-700"}`}>
+                                        <span>{isExecuting ? "🔄" : "✅"}</span>
+                                        <span>{meta.emoji}</span>
+                                        <span className="font-medium">{meta.label}</span>
+                                        {argText && <span className="text-muted-foreground truncate">：{argText}</span>}
+                                    </div>
+                                );
+                            })}
+                        </div>
                         {mainAnswer && (
-                            <div className="text-sm whitespace-pre-wrap font-mono bg-gray-50 rounded-lg p-4 mb-4 leading-relaxed">
-                                {mainAnswer}
+                            <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                                <MarkdownRenderer content={mainAnswer} />
                             </div>
                         )}
                         {phase === "verifying" && verifyAnswer && (
-                            <div className="text-sm whitespace-pre-wrap font-mono bg-orange-50 rounded-lg p-4 mb-4 border border-orange-200 leading-relaxed">
-                                {verifyAnswer}
+                            <div className="bg-orange-50 rounded-lg p-4 mb-4 border border-orange-200">
+                                <MarkdownRenderer content={verifyAnswer} />
                             </div>
                         )}
                         <p className="text-sm text-gray-400 text-center py-8">
@@ -77,8 +90,29 @@ export default function ResultPanel({
 
                 {status === "done" && mainAnswer && (
                     <div className="space-y-4">
-                        <div className="text-sm whitespace-pre-wrap font-mono bg-gray-50 rounded-lg p-4 leading-relaxed">
-                            {mainAnswer}
+                        {toolSteps.length > 0 && (
+                            <details className="text-xs" open>
+                                <summary className="cursor-pointer text-muted-foreground mb-2">
+                                    工具调用记录（{toolSteps.length} 步）
+                                </summary>
+                                <div className="space-y-1">
+                                    {toolSteps.map((s) => {
+                                        const meta = getToolMeta(s.toolName);
+                                        const argText = formatArgs(s.args ?? {});
+                                        return (
+                                            <div key={s.step} className="rounded px-2 py-1 flex items-center gap-1.5 bg-green-50 text-green-700">
+                                                <span>✅</span>
+                                                <span>{meta.emoji}</span>
+                                                <span className="font-medium">{meta.label}</span>
+                                                {argText && <span className="text-muted-foreground truncate">：{argText}</span>}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </details>
+                        )}
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <MarkdownRenderer content={mainAnswer} />
                         </div>
 
                         {verifyAnswer && (
@@ -86,11 +120,16 @@ export default function ResultPanel({
                                 <summary className="cursor-pointer font-medium text-orange-600">
                                     验证报告 ▸
                                 </summary>
-                                <div className="mt-2 whitespace-pre-wrap font-mono bg-orange-50 rounded-lg p-4 border border-orange-200 leading-relaxed">
-                                    {verifyAnswer}
+                                <div className="mt-2 bg-orange-50 rounded-lg p-4 border border-orange-200">
+                                    <MarkdownRenderer content={verifyAnswer} />
                                 </div>
                             </details>
                         )}
+
+                        <EvalLabeler
+                            reviewOutput={mainAnswer}
+                            verifyOutput={verifyAnswer || undefined}
+                        />
 
                         {verifyResult && (
                             <div
