@@ -10,7 +10,7 @@ export interface Message {
 }
 
 export interface ModelClient {
-    chat: (messages: Message[]) => Promise<string>;
+    chat: (messages: Message[], signal?: AbortSignal) => Promise<string>;
 }
 
 export type ParseResult =
@@ -24,6 +24,7 @@ export default async function runReActLoop(
     executor: ToolExecutor,
     model: ModelClient,
     externalCtx?: ContextManager,
+    signal?: AbortSignal,
 ): Promise<string> {
     // 1. 组装 system prompt
     const systemPrompt = buildSystemPrompt(registry);
@@ -38,9 +39,10 @@ export default async function runReActLoop(
     const maxRetries = 2;
     while (stepCount < maxSteps) {
         stepCount++;
+        if (signal?.aborted) throw new Error("用户中断");
         const rawMessages = memory.getAllMessages();
         const messages = await ctxManager.build(rawMessages);
-        const result = await model.chat(messages);
+        const result = await model.chat(messages, signal);
         memory.add({
             role: "assistant",
             content: result
@@ -89,22 +91,21 @@ export default async function runReActLoop(
 }
 
 export function parseModelOutput(raw: string, registry: ToolRegistry): ParseResult {
-    // 1. 尝试匹配 <tool_call>...</tool_call>
-    const tcMatch = raw.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/);
+    // 用字符串定位 <tool_call>...</tool_call>，避免正则 \{[\s\S]*?\} 被代码中的 {} 干扰
+    const tcStart = raw.indexOf("<tool_call>");
+    const tcEnd = raw.indexOf("</tool_call>");
+    const hasToolCall = tcStart !== -1 && tcEnd !== -1 && tcEnd > tcStart;
 
-    if (tcMatch) {
-        // 提取 Thought（可选）
+    if (hasToolCall) {
         const thoughtMatch = raw.match(/Thought\s*:\s*([\s\S]+?)(?=<tool_call>|$)/i);
         const thought = thoughtMatch ? thoughtMatch[1].trim() : "";
 
-        // 尝试 JSON.parse
-        let jsonStr = tcMatch[1].trim();
+        const jsonStr = raw.slice(tcStart + "<tool_call>".length, tcEnd).trim();
         try {
             const parsed = JSON.parse(jsonStr);
             const toolName: string = parsed.name;
             const args: Record<string, unknown> = parsed.arguments ?? {};
 
-            // 校验工具是否存在
             if (!registry.get(toolName)) {
                 return {
                     type: "parse_error",

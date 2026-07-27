@@ -1,5 +1,5 @@
 "use client";
-import { useReducer } from "react";
+import { useReducer, useRef } from "react";
 
 export type AgentStatus = "idle" | "running" | "done" | "error";
 
@@ -10,26 +10,67 @@ interface ToolStep {
     observation?: string;
 }
 
+export interface VerifyResult {
+    before: string;
+    after: string;
+    passed: boolean;
+}
+
+export interface Task {
+    id: string;
+    title: string;
+    code: string;
+    question: string;
+    mode: "react" | "plan-execute" | "reflection";
+    mainAnswer: string;
+    verifyAnswer: string;
+    verifyResult: VerifyResult | null;
+    toolSteps: ToolStep[];
+    status: AgentStatus;
+}
+
 export interface AgentState {
     code: string;
     question: string;
+    mode: "react" | "plan-execute" | "reflection";
+    verify: boolean;
     status: AgentStatus;
-    answer: string;
+    phase: "executing" | "verifying" | null;
+    mainAnswer: string;
+    verifyAnswer: string;
+    verifyResult: VerifyResult | null;
     error: string;
     traces: any[];
     contextStats: any;
     toolSteps: ToolStep[];
+    tasks: Task[];
+    currentTaskId: string | null;
+    reviewMode: "code" | "pr";
+    prUrl: string;
+    githubToken: string;
 }
 
 type AgentAction =
     | { type: "SET_CODE"; payload: string }
     | { type: "SET_QUESTION"; payload: string }
+    | { type: "SET_MODE"; payload: AgentState["mode"] }
+    | { type: "SET_VERIFY"; payload: boolean }
     | { type: "SEND" }
-    | { type: "FAIL"; payload: string }
-    | { type: "RESET" }
+    | { type: "SET_PHASE"; payload: AgentState["phase"] }
     | { type: "DELTA"; payload: string }
     | { type: "TOOL_START"; payload: { step: number; toolName: string; args: Record<string, unknown>; observation?: string } }
-    | { type: "FINISH" };
+    | { type: "SET_VERIFY_RESULT"; payload: VerifyResult }
+    | { type: "FINISH" }
+    | { type: "STOP" }
+    | { type: "FAIL"; payload: string }
+    | { type: "RESET" }
+    | { type: "NEW_TASK"; payload: string }
+    | { type: "SWITCH_TASK"; payload: string }
+    | { type: "DELETE_TASK"; payload: string }
+    | { type: "LOAD_TASKS"; payload: Task[] }
+    | { type: "SET_REVIEW_MODE"; payload: "code" | "pr" }
+    | { type: "SET_PR_URL"; payload: string }
+    | { type: "SET_GITHUB_TOKEN"; payload: string };
 
 function reducer(state: AgentState, action: AgentAction): AgentState {
     switch (action.type) {
@@ -37,42 +78,138 @@ function reducer(state: AgentState, action: AgentAction): AgentState {
             return { ...state, code: action.payload };
         case "SET_QUESTION":
             return { ...state, question: action.payload };
+        case "SET_MODE":
+            return { ...state, mode: action.payload };
+        case "SET_VERIFY":
+            return { ...state, verify: action.payload };
         case "SEND":
-            return { ...state, status: "running", answer: "", error: "", toolSteps: [] };
+            return { ...state, status: "running", mainAnswer: "", verifyAnswer: "", verifyResult: null, error: "", toolSteps: [], phase: null };
         case "FAIL":
             return { ...state, status: "error", error: action.payload };
         case "RESET":
-            return { code: "", question: "", status: "idle", answer: "", error: "", traces: [], contextStats: null, toolSteps: [] };
+            return { code: "", question: "", mode: "react", verify: false, status: "idle", phase: null, mainAnswer: "", verifyAnswer: "", verifyResult: null, error: "", traces: [], contextStats: null, toolSteps: [], tasks: [], currentTaskId: null, reviewMode: "code" as const, prUrl: "", githubToken: "" };
+        case "SET_PHASE":
+            return { ...state, phase: action.payload };
         case "DELTA":
-            return { ...state, answer: state.answer + action.payload };
+            if (state.phase === "verifying") {
+                return { ...state, verifyAnswer: state.verifyAnswer + action.payload };
+            }
+            return { ...state, mainAnswer: state.mainAnswer + action.payload };
         case "TOOL_START":
             return {
                 ...state,
                 toolSteps: [...state.toolSteps, { step: action.payload.step, toolName: action.payload.toolName, args: action.payload.args, observation: action.payload.observation }],
             };
+        case "SET_VERIFY_RESULT":
+            return { ...state, verifyResult: action.payload };
         case "FINISH":
             return { ...state, status: "done" };
+        case "STOP":
+            return { ...state, status: "idle" };
+        case "NEW_TASK": {
+            if (state.status === "running") return state;
+            let updatedTasks = state.tasks;
+            if (state.currentTaskId) {
+                updatedTasks = state.tasks.map((t) =>
+                    t.id === state.currentTaskId
+                        ? { ...t, code: state.code, question: state.question, mode: state.mode }
+                        : t
+                );
+            }
+            const newTask: Task = {
+                id: action.payload,
+                title: `代码审查 #${updatedTasks.length + 1}`,
+                code: "",
+                question: "",
+                mode: state.mode,
+                mainAnswer: "",
+                verifyAnswer: "",
+                verifyResult: null,
+                toolSteps: [],
+                status: "idle",
+            };
+            return {
+                ...state,
+                code: "",
+                question: "",
+                mainAnswer: "",
+                verifyAnswer: "",
+                verifyResult: null,
+                toolSteps: [],
+                status: "idle",
+                tasks: [...updatedTasks, newTask],
+                currentTaskId: newTask.id,
+            };
+        }
+        case "SWITCH_TASK": {
+            if (state.status === "running") return state;
+            const target = state.tasks.find((t) => t.id === action.payload);
+            if (!target) return state;
+            return {
+                ...state,
+                currentTaskId: target.id,
+                code: target.code,
+                question: target.question,
+                mode: target.mode,
+                mainAnswer: target.mainAnswer,
+                verifyAnswer: target.verifyAnswer,
+                verifyResult: target.verifyResult,
+                toolSteps: target.toolSteps,
+                status: target.status,
+            };
+        }
+        case "DELETE_TASK": {
+            if (state.status === "running") return state;
+            const filtered = state.tasks.filter((t) => t.id !== action.payload);
+            const nextId = state.currentTaskId === action.payload
+                ? (filtered[0]?.id ?? null)
+                : state.currentTaskId;
+            return {
+                ...state,
+                tasks: filtered,
+                currentTaskId: nextId,
+            };
+        }
+        case "SET_REVIEW_MODE":
+            return { ...state, reviewMode: action.payload };
+        case "SET_PR_URL":
+            return { ...state, prUrl: action.payload };
+        case "SET_GITHUB_TOKEN":
+            return { ...state, githubToken: action.payload };
+        case "LOAD_TASKS":
+            return {
+                ...state,
+                tasks: action.payload,
+                currentTaskId: action.payload[0]?.id ?? null,
+            };
         default:
             return state;
     }
 }
 
 const initialState: AgentState = {
-    code: "", question: "", status: "idle", answer: "", error: "", traces: [], contextStats: null, toolSteps: [],
+    code: "", question: "", mode: "react", verify: false, status: "idle", phase: null, mainAnswer: "", verifyAnswer: "", verifyResult: null, error: "", traces: [], contextStats: null, toolSteps: [], tasks: [], currentTaskId: null, reviewMode: "code", prUrl: "", githubToken: "",
 };
 
 export function useAgent() {
     const [state, dispatch] = useReducer(reducer, initialState);
+    const controllerRef = useRef<AbortController | null>(null);
+
+    const DEFAULT_QUESTION = "请分析这段代码的安全漏洞和潜在问题";
 
     const sendStream = async () => {
-        if (!state.question.trim()) return;
+        if (!state.code.trim()) return;
+        if (!state.question.trim()) {
+            dispatch({ type: "SET_QUESTION", payload: DEFAULT_QUESTION });
+        }
+        const promptQuestion = state.question.trim() || DEFAULT_QUESTION;
         dispatch({ type: "SEND" });
 
         try {
             const res = await fetch("/api/agent/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt: `${state.question}\n\n代码：\n${state.code}` }),
+                body: JSON.stringify({ prompt: `${promptQuestion}\n\n代码：\n${state.code}` }),
             });
             if (!res.ok || !res.body) throw new Error("流式请求失败");
 
@@ -107,5 +244,175 @@ export function useAgent() {
         }
     };
 
-    return { state, dispatch, sendStream };
+    const sendOrchestrate = async () => {
+        if (!state.code.trim()) return;
+        if (!state.question.trim()) {
+            dispatch({ type: "SET_QUESTION", payload: DEFAULT_QUESTION });
+        }
+        const promptQuestion = state.question.trim() || DEFAULT_QUESTION;
+        dispatch({ type: "SEND" });
+
+        const controller = new AbortController();
+        controllerRef.current = controller;
+
+        try {
+            const res = await fetch("/api/agent/orchestrate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prompt: `${promptQuestion}\n\n代码：\n${state.code}`,
+                    mode: state.mode,
+                    verify: state.verify,
+                }),
+                signal: controller.signal,
+            });
+            if (!res.ok || !res.body) throw new Error("编排请求失败");
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split("\n\n");
+                buffer = parts.pop() ?? "";
+
+                for (const part of parts) {
+                    if (!part.trim()) continue;
+                    const jsonStr = part.replace(/^data:\s*/, "");
+                    const event = JSON.parse(jsonStr);
+                    switch (event.type) {
+                        case "phase":
+                            dispatch({ type: "SET_PHASE", payload: event.phase });
+                            break;
+                        case "delta":
+                            dispatch({ type: "DELTA", payload: event.text });
+                            break;
+                        case "step":
+                            dispatch({ type: "TOOL_START", payload: event });
+                            break;
+                        case "done":
+                            if (event.verifyResult) {
+                                dispatch({ type: "SET_VERIFY_RESULT", payload: event.verifyResult });
+                            }
+                            dispatch({ type: "FINISH" });
+                            break;
+                    }
+                }
+            }
+        } catch (err: any) {
+            if (err.name === "AbortError") return;
+            dispatch({ type: "FAIL", payload: err.message });
+        } finally {
+            controllerRef.current = null;
+        }
+    };
+
+    const stopAgent = () => {
+        controllerRef.current?.abort();
+        dispatch({ type: "STOP" });
+        controllerRef.current = null;
+    };
+
+    const createTask = async () => {
+        const res = await fetch("/api/agent/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                title: `代码审查 #${state.tasks.length + 1}`,
+                mode: "react",
+            }),
+        });
+        const data = await res.json();
+        dispatch({ type: "NEW_TASK", payload: data.task.id });
+    };
+    const switchTask = (id: string) => dispatch({ type: "SWITCH_TASK", payload: id });
+    const deleteTask = async (id: string) => {
+        const prevTasks = state.tasks;
+        dispatch({ type: "DELETE_TASK", payload: id });
+        try {
+            await fetch(`/api/agent/tasks?id=${id}`, { method: "DELETE" });
+        } catch {
+            dispatch({ type: "LOAD_TASKS", payload: prevTasks });
+        }
+    };
+
+    const loadTasks = async (): Promise<number> => {
+        const res = await fetch("/api/agent/tasks");
+        const data = await res.json();
+        if (data.tasks) {
+            dispatch({ type: "LOAD_TASKS", payload: data.tasks });
+            return data.tasks.length;
+        }
+        return 0;
+    };
+
+    const sendPRReview = async () => {
+        if (!state.prUrl.trim()) return;
+        dispatch({ type: "SEND" });
+
+        const controller = new AbortController();
+        controllerRef.current = controller;
+
+        try {
+            const res = await fetch("/api/agent/pr-review", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prUrl: state.prUrl,
+                    githubToken: state.githubToken || undefined,
+                }),
+                signal: controller.signal,
+            });
+            if (!res.ok || !res.body) {
+                const err = await res.json().catch(() => ({ error: "请求失败" }));
+                dispatch({ type: "FAIL", payload: err.error });
+                return;
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split("\n\n");
+                buffer = parts.pop() ?? "";
+
+                for (const part of parts) {
+                    if (!part.trim()) continue;
+                    const jsonStr = part.replace(/^data:\s*/, "");
+                    const event = JSON.parse(jsonStr);
+                    switch (event.type) {
+                        case "phase":
+                            dispatch({ type: "SET_PHASE", payload: event.phase });
+                            break;
+                        case "delta":
+                            dispatch({ type: "DELTA", payload: event.text });
+                            break;
+                        case "step":
+                            dispatch({ type: "TOOL_START", payload: event });
+                            break;
+                        case "done":
+                            if (event.verifyResult) {
+                                dispatch({ type: "SET_VERIFY_RESULT", payload: event.verifyResult });
+                            }
+                            dispatch({ type: "FINISH" });
+                            break;
+                    }
+                }
+            }
+        } catch (err: any) {
+            if (err.name === "AbortError") return;
+            dispatch({ type: "FAIL", payload: err.message });
+        } finally {
+            controllerRef.current = null;
+        }
+    };
+
+    return { state, dispatch, sendStream, sendOrchestrate, stopAgent, sendPRReview, createTask, switchTask, deleteTask, loadTasks };
 }

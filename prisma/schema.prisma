@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Task {
+  id                 String   @id @default(uuid())
+  title              String
+  code                String
+  question            String
+  mode                String
+  mainAnswer          String   @default("")
+  verifyAnswer        String   @default("")
+  verifyResultPassed  Boolean?
+  toolSteps           Json     @default("[]")
+  status              String   @default("idle")
+  createdAt           DateTime @default(now())
+}
+
+model Evaluation {
+  id            String   @id @default(cuid())
+  reviewOutput  String
+  verifyOutput  String?
+  label         String
+  comment       String?
+  superseded    Boolean  @default(false)
+  timestamp     DateTime @default(now())
+}
+
+model PrReview {
+  id             String   @id
+  prUrl          String
+  diff           String
+  reviewResult   String   @default("")
+  commentPosted  Boolean  @default(false)
+  createdAt      DateTime @default(now())
+}

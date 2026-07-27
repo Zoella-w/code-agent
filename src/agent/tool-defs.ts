@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { Tool } from "./tools";
+import { Tool, ToolRegistry } from "./tools";
 import { validatePath } from "./tool-executor";
+import type { ModelClient } from "./model-client";
 
 export const readFileTool: Tool = {
     schema: {
@@ -235,4 +236,32 @@ export const analyzeCodeTool: Tool = {
 
 分析片段长度：${args.snippet.length} 字符`;
     }
+}
+
+/** 真实 LLM 版 analyze_code：接收 model，execute 里调 model.chat() 做代码分析 */
+export function createAnalyzeCodeTool(model: ModelClient): Tool {
+    return {
+        schema: analyzeCodeTool.schema,
+        execute: async (args) => {
+            if (!args.snippet || typeof args.snippet !== "string") {
+                return "错误：缺少必填参数 snippet";
+            }
+            const prompt = `请分析以下代码片段，检测潜在问题（安全漏洞、性能瓶颈、代码异味），返回具体问题列表：\n\n${args.snippet}`;
+            return await model.chat([
+                { role: "system", content: "你是一个代码审查专家，仔细分析代码并给出具体的改进建议。" },
+                { role: "user", content: prompt },
+            ]);
+        }
+    };
+}
+
+/** 创建默认工具注册表，注册全部 5 个工具 */
+export function createDefaultRegistry(model?: ModelClient): ToolRegistry {
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+    registry.register(searchCodeTool);
+    registry.register(listDirectoryTool);
+    registry.register(writeFileTool);
+    registry.register(model ? createAnalyzeCodeTool(model) : analyzeCodeTool);
+    return registry;
 }

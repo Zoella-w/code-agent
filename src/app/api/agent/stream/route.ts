@@ -5,13 +5,8 @@ import { readFileTool, searchCodeTool, listDirectoryTool, writeFileTool, analyze
 import { ToolExecutor } from "@/agent/tool-executor";
 import { registerExecutor, removeExecutor } from "@/agent/executor-store";
 import { ConversationMemory } from "@/agent/memory";
-import { AnthropicModelClient } from "@/agent/model-client";
+import { AnthropicModelClient, StreamingModelClient } from "@/agent/model-client";
 import { ContextManager } from "@/agent/context-manager";
-
-const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    baseURL: "https://api.deepseek.com/anthropic",
-});
 
 type SSEEvent =
     | { type: "delta"; text: string }
@@ -87,59 +82,67 @@ export async function POST(request: NextRequest) {
                         .filter((m) => m.role === "user" || m.role === "assistant")
                         .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
-                    // 非流式调用（DeepSeek 不支持 streaming）
-                    const response = await client.messages.create({
-                        model: "deepseek-v4-pro",
-                        max_tokens: 4096,
-                        system: systemMsg?.content,
-                        messages: chatMessages,
-                        tools: tools,
-                    });
+                    // 流式/非流式统一调用（Claude 流式、DeepSeek 非流式，由 StreamingModelClient 内部抹平差异）
+                    const streamingClient = new StreamingModelClient();
+                    let fullText = "";
+                    let wasStreamed = false;
+                    const toolCalls: { name: string; input: Record<string, unknown> }[] = [];
 
-                    const toolBlocks = response.content.filter(
-                        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-                    );
-                    const textBlocks = response.content.filter(
-                        (b): b is Anthropic.TextBlock => b.type === "text"
-                    );
-                    const textContent = textBlocks.map((b) => b.text).join("");
+                    for await (const event of streamingClient.streamChat(
+                        systemMsg?.content,
+                        chatMessages,
+                        tools,
+                    )) {
+                        if (event.type === "text_delta") {
+                            // Claude 流式：token 逐个到达，实时推给前端
+                            sendSSE(controller, { type: "delta", text: event.text });
+                            fullText += event.text;
+                            wasStreamed = true;
+                        } else if (event.type === "text_done") {
+                            // DeepSeek 非流式：文本一次性到达，先记录，循环结束后发送
+                            fullText = event.text;
+                        } else if (event.type === "tool_use") {
+                            toolCalls.push({ name: event.name, input: event.input });
+                        }
+                    }
 
-                    memory.add({ role: "assistant", content: textContent || "(tool call)" });
+                    memory.add({ role: "assistant", content: fullText || "(tool call)" });
 
-                    if (toolBlocks.length > 0) {
-                        for (const tb of toolBlocks) {
-                            if (!registry.get(tb.name)) continue;
+                    if (toolCalls.length > 0) {
+                        for (const tc of toolCalls) {
+                            if (!registry.get(tc.name)) continue;
 
                             try {
                                 const result = await executor.execute(
-                                    tb.name,
-                                    tb.input as Record<string, unknown>,
+                                    tc.name,
+                                    tc.input as Record<string, unknown>,
                                     30000,
                                     runId
                                 );
                                 sendSSE(controller, {
                                     type: "step",
                                     step: stepCount,
-                                    toolName: tb.name,
-                                    args: tb.input as Record<string, unknown>,
+                                    toolName: tc.name,
+                                    args: tc.input as Record<string, unknown>,
                                     observation: result.content.slice(0, 500),
                                 });
                                 memory.add({
                                     role: "user",
-                                    content: `工具 ${tb.name} 返回：${result.content}`,
+                                    content: `工具 ${tc.name} 返回：${result.content}`,
                                 });
                             } catch (toolErr) {
                                 memory.add({
                                     role: "user",
-                                    content: `工具 ${tb.name} 执行失败：${(toolErr as Error).message}`,
+                                    content: `工具 ${tc.name} 执行失败：${(toolErr as Error).message}`,
                                 });
                             }
                         }
                         continue;
                     }
 
-                    if (textContent) {
-                        sendSSE(controller, { type: "delta", text: textContent });
+                    if (fullText && !wasStreamed) {
+                        // 仅 DeepSeek 非流式路径：文本尚未发送，在此处发送
+                        sendSSE(controller, { type: "delta", text: fullText });
                     }
                     return;
                 }
@@ -152,17 +155,11 @@ export async function POST(request: NextRequest) {
                     .filter((m) => m.role === "user" || m.role === "assistant")
                     .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
-                const response = await client.messages.create({
-                    model: "deepseek-v4-pro",
-                    max_tokens: 2048,
-                    system: `${systemMsg?.content}\n\n不要再调工具了，直接给出最终审查结论。`,
-                    messages: chatMessages,
-                });
-
-                const answer = response.content
-                    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-                    .map((b) => b.text)
-                    .join("");
+                const finalClient = new AnthropicModelClient();
+                const answer = await finalClient.chat([
+                    ...(systemMsg ? [{ role: "system" as const, content: `${systemMsg.content}\n\n不要再调工具了，直接给出最终审查结论。` }] : []),
+                    ...chatMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+                ]);
                 sendSSE(controller, { type: "delta", text: answer || "分析完成，但未能生成结论。" });
             } catch (err) {
                 sendSSE(controller, { type: "delta", text: `错误：${(err as Error).message}` });

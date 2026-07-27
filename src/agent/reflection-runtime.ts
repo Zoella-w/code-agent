@@ -11,6 +11,7 @@ async function runActor(
     executor: ToolExecutor,
     model: ModelClient,
     reflection: string,
+    signal?: AbortSignal,
 ): Promise<{ answer: string; messages: Message[] }> {
     let systemPrompt = buildSystemPrompt(registry);
     if (reflection) {
@@ -31,7 +32,8 @@ async function runActor(
     const maxSteps = 10;
     while (stepCount < maxSteps) {
         stepCount++;
-        const raw = await model.chat(messages);
+        if (signal?.aborted) throw new Error("用户中断");
+        const raw = await model.chat(messages, signal);
         messages.push({ role: "assistant", content: raw });
 
         // 解析 LLM 输出：判断是调工具还是给最终回答
@@ -60,7 +62,7 @@ async function runActor(
         role: "user",
         content: "已达到最大步数。请基于已有的 Observation 信息，用 Final Answer 给出你的回答。",
     });
-    const forced = await model.chat(messages);
+    const forced = await model.chat(messages, signal);
     messages.push({ role: "assistant", content: forced });
     return { answer: forced, messages };
 }
@@ -70,6 +72,7 @@ async function evaluateResult(
     task: string,
     answer: string,
     model: ModelClient,
+    signal?: AbortSignal,
 ): Promise<{ passed: boolean }> {
     const systemPrompt = [
         "你是一个严格的评估器。对照原始任务，判断以下回答是否完整、准确。",
@@ -83,7 +86,7 @@ async function evaluateResult(
         { role: "user", content: `原始任务：${task}\n\n待评估回答：${answer}` },
     ];
 
-    const raw = await model.chat(messages);
+    const raw = await model.chat(messages, signal);
     const passed = raw.trim().toUpperCase().includes("PASS");
 
     return { passed };
@@ -95,6 +98,7 @@ async function generateReflection(
     answer: string,
     messages: Message[],
     model: ModelClient,
+    signal?: AbortSignal,
 ): Promise<string> {
     const systemPrompt = [
         "你是一个反思分析师。你的任务是分析 Actor 的执行过程，找出导致回答不满足要求的根本原因。",
@@ -120,7 +124,7 @@ async function generateReflection(
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent },
     ];
-    const raw = await model.chat(chatMessages);
+    const raw = await model.chat(chatMessages, signal);
     return raw.trim();
 }
 
@@ -130,6 +134,7 @@ export default async function reflectAndExecute(
     registry: ToolRegistry,
     executor: ToolExecutor,
     model: ModelClient,
+    signal?: AbortSignal,
 ): Promise<{ answer: string; rounds: number }> {
     let reflection = "";  // 上一轮的反思文本，首轮为空
     let round = 0;
@@ -138,17 +143,18 @@ export default async function reflectAndExecute(
     let lastAnswer = "";  // 记录最后一轮 answer，兜底用
     while (round < maxRounds) {
         round++;
+        if (signal?.aborted) throw new Error("用户中断");
         // 1. Actor 执行，拿结果和对话历史
-        const { answer, messages } = await runActor(task, registry, executor, model, reflection);
+        const { answer, messages } = await runActor(task, registry, executor, model, reflection, signal);
         lastAnswer = answer;
 
         // 2. Evaluator 评估：合格就直接返回
-        const { passed } = await evaluateResult(task, answer, model);
+        const { passed } = await evaluateResult(task, answer, model, signal);
         if (passed) {
             return { answer, rounds: round };
         }
         // 3. 不合格 → Reflector 反思，下一轮 Actor 会注入 System Prompt
-        reflection = await generateReflection(task, answer, messages, model);
+        reflection = await generateReflection(task, answer, messages, model, signal);
     }
     // 反思优化达到最大轮数，但仍未满意，返回最后一次答案
     return { answer: lastAnswer, rounds: maxRounds };

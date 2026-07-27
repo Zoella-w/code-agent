@@ -121,12 +121,15 @@ export class ToolExecutor {
     onApprovalRequired: ((req: ApprovalRequest) => void) | null = null;
     /** 挂起的审批 Map（runId → PendingApproval） */
     private pendingApprovals = new Map<string, PendingApproval>();
+    /** 环境变量敏感值缓存，构造时扫描一次 */
+    private secrets: [string, string][] = [];
 
     constructor(registry: ToolRegistry, sandboxRoot?: string, fileStore?: FileSummaryStore) {
         this.registry = registry;
         this.sandboxRoot = sandboxRoot ?? process.cwd();
         this.traces = [];
         this.fileStore = fileStore;
+        this.secrets = detectSecretEnvItems();
     }
 
     // 执行一个工具，返回统一格式的 ToolResult
@@ -198,12 +201,13 @@ export class ToolExecutor {
                     )
                 ),
             ]);
+            const cleanResult = redactText(rawResult, this.secrets);
             const durationMs = Date.now() - startTime;
             const maxLen = 3000;
-            const truncated = rawResult.length > maxLen;
+            const truncated = cleanResult.length > maxLen;
             const content = truncated
-                ? rawResult.slice(0, maxLen) + "\n...(输出过长，已截断)"
-                : rawResult;
+                ? cleanResult.slice(0, maxLen) + "\n...(输出过长，已截断)"
+                : cleanResult;
             this.traces.push({
                 toolName: name,
                 args,

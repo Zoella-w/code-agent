@@ -1,5 +1,13 @@
 node_modules/
 .next/
+.env
 .env.local
 .env*.local
 .vercel
+*.tsbuildinfo
+
+/src/generated/prisma
+.agents/
+.claude/
+.windsurf/
+skills-lock.json

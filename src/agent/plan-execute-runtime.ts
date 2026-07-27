@@ -35,6 +35,7 @@ async function generatePlan(
     task: string,
     registry: ToolRegistry,
     model: ModelClient,
+    signal?: AbortSignal,
 ): Promise<string[]> {
     const systemPrompt = buildPlanningPrompt(task, registry);
     const messages: Message[] = [
@@ -42,8 +43,7 @@ async function generatePlan(
         { role: "user", content: task },
     ];
 
-    const raw = await model.chat(messages);
-    // 取出 LLM 回答中的 ```json...``` 代码块
+    const raw = await model.chat(messages, signal);
     let jsonStr = raw.trim();
     const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (fenceMatch) {
@@ -64,9 +64,10 @@ export default async function planAndExecute(
     registry: ToolRegistry,
     executor: ToolExecutor,
     model: ModelClient,
+    signal?: AbortSignal,
 ): Promise<string> {
     // Phase 1: Planning — 生成步骤列表
-    const plan: string[] = await generatePlan(task, registry, model);
+    const plan: string[] = await generatePlan(task, registry, model, signal);
     if (plan.length === 0) {
         return "计划生成失败，请重试。";
     }
@@ -74,6 +75,7 @@ export default async function planAndExecute(
     // Phase 2: Execution — 逐步执行
     const stepResults: StepResult[] = [];
     for (let i = 0; i < plan.length; i++) {
+        if (signal?.aborted) throw new Error("用户中断");
         const result = await executeStep(
             plan[i],       // 当前步骤
             i + 1,         // 步骤编号
@@ -82,12 +84,13 @@ export default async function planAndExecute(
             registry,
             executor,
             model,
+            signal,
         );
         stepResults.push(result);
     }
 
     // Phase 3: Summarization — 汇总所有步骤结果
-    const finalAnswer = await summarize(task, stepResults, model);
+    const finalAnswer = await summarize(task, stepResults, model, signal);
     return finalAnswer;
 }
 
@@ -100,6 +103,7 @@ async function executeStep(
     registry: ToolRegistry,
     executor: ToolExecutor,
     model: ModelClient,
+    signal?: AbortSignal,
 ): Promise<StepResult> {
     // 拼装 system prompt：工具列表 + 当前步骤上下文（包含前面步骤上下文）
     const prevText = previousResults.length > 0
@@ -123,7 +127,8 @@ async function executeStep(
     // 迷你 ReAct 循环：每步调 LLM → 解析意图 → 调工具或给结果
     while (stepCount < maxSteps) {
         stepCount++;
-        const raw = await model.chat(messages);
+        if (signal?.aborted) throw new Error("用户中断");
+        const raw = await model.chat(messages, signal);
         messages.push({ role: "assistant", content: raw });
         // 解析 LLM 输出，判断类型：tool_call / final_answer / parse_error
         const parsed = parseModelOutput(raw, registry);
@@ -155,7 +160,7 @@ async function executeStep(
         role: "user",
         content: "已达到最大步数。请基于已有的 Observation 信息，用 Final Answer 给出这一步的当前结果。",
     });
-    const forced = await model.chat(messages);
+    const forced = await model.chat(messages, signal);
     return {
         step: stepNumber,
         description: stepDescription,
@@ -168,6 +173,7 @@ async function summarize(
     task: string,
     stepResults: StepResult[],
     model: ModelClient,
+    signal?: AbortSignal,
 ): Promise<string> {
     // 将各步骤结果拼成 LLM 可读的文本
     const resultsText = stepResults
@@ -185,5 +191,5 @@ async function summarize(
         { role: "system", content: systemPrompt },
         { role: "user", content: "请基于以上执行结果，对原始任务给出最终回答。" },
     ];
-    return await model.chat(messages);
+    return await model.chat(messages, signal);
 }
