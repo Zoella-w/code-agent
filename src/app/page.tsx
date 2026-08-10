@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { AgentProvider } from "@/context/agent-context";
 import { useAgent } from "@/hooks/useAgent";
 import InputPanel from "@/components/InputPanel";
 import TaskSidebar from "@/components/TaskSidebar";
@@ -49,11 +50,9 @@ export default function Home() {
   }, [state.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
+    <AgentProvider state={state} dispatch={dispatch}>
     <div className="h-full flex">
       <TaskSidebar
-        tasks={state.tasks}
-        currentTaskId={state.currentTaskId}
-        disabled={state.status === "running"}
         onCreateTask={createTask}
         onSwitchTask={switchTask}
         onDeleteTask={deleteTask}
@@ -61,21 +60,6 @@ export default function Home() {
 
       <div className="w-[40%] border-r shrink-0">
         <InputPanel
-          code={state.code}
-          question={state.question}
-          mode={state.mode}
-          verify={state.verify}
-          status={state.status}
-          onCodeChange={(v) => dispatch({ type: "SET_CODE", payload: v })}
-          onQuestionChange={(v) => dispatch({ type: "SET_QUESTION", payload: v })}
-          onModeChange={(v) => dispatch({ type: "SET_MODE", payload: v })}
-          onVerifyChange={(v) => dispatch({ type: "SET_VERIFY", payload: v })}
-          reviewMode={state.reviewMode}
-          prUrl={state.prUrl}
-          githubToken={state.githubToken}
-          onReviewModeChange={(v) => dispatch({ type: "SET_REVIEW_MODE", payload: v })}
-          onPrUrlChange={(v) => dispatch({ type: "SET_PR_URL", payload: v })}
-          onGithubTokenChange={(v) => dispatch({ type: "SET_GITHUB_TOKEN", payload: v })}
           onSend={state.reviewMode === "pr" ? sendPRReview : sendOrchestrate}
           onStop={stopAgent}
         />
@@ -83,14 +67,7 @@ export default function Home() {
 
       <div className="flex-1 flex flex-col min-w-0">
         <ResultPanel
-          status={state.status}
-          phase={state.phase}
-          mainAnswer={state.mainAnswer}
-          verifyAnswer={state.verifyAnswer}
-          verifyResult={state.verifyResult}
-          toolSteps={state.toolSteps}
           onOpenTrace={() => setTraceOpen(true)}
-          reviewMode={state.reviewMode}
           onOpenEval={() => setEvalOpen(true)}
           onRetry={state.reviewMode === "pr" ? sendPRReview : sendOrchestrate}
           onPostComment={async () => {
@@ -112,9 +89,6 @@ export default function Home() {
       <TraceViewer
         open={traceOpen}
         onClose={() => setTraceOpen(false)}
-        traces={state.traces}
-        toolSteps={state.toolSteps}
-        contextStats={state.contextStats}
       />
 
       <Sheet open={evalOpen} onOpenChange={(o) => setEvalOpen(o)}>
@@ -128,5 +102,6 @@ export default function Home() {
         </SheetContent>
       </Sheet>
     </div>
+    </AgentProvider>
   );
 }

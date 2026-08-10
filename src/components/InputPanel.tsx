@@ -4,47 +4,18 @@ import { Button } from "@/components/ui/button";
 import Editor from "react-simple-code-editor";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { useAgentState, useAgentDispatch } from "@/context/agent-context";
 
-// 定义这个组件需要父组件传什么数据给它
+// 行为走 props，数据走 Context
 interface InputPanelProps {
-    code: string;
-    question: string;
-    mode: "react" | "plan-execute" | "reflection";
-    verify: boolean;
-    status: string;
-    reviewMode: "code" | "pr";
-    prUrl: string;
-    githubToken: string;
-    onCodeChange: (value: string) => void;
-    onQuestionChange: (value: string) => void;
-    onModeChange: (value: "react" | "plan-execute" | "reflection") => void;
-    onVerifyChange: (value: boolean) => void;
-    onReviewModeChange: (value: "code" | "pr") => void;
-    onPrUrlChange: (value: string) => void;
-    onGithubTokenChange: (value: string) => void;
     onSend: () => void;
     onStop: () => void;
 }
 
-export default function InputPanel({
-    code,
-    question,
-    mode,
-    verify,
-    status,
-    reviewMode,
-    prUrl,
-    githubToken,
-    onCodeChange,
-    onQuestionChange,
-    onModeChange,
-    onVerifyChange,
-    onReviewModeChange,
-    onPrUrlChange,
-    onGithubTokenChange,
-    onSend,
-    onStop,
-}: InputPanelProps) {
+export default function InputPanel({ onSend, onStop }: InputPanelProps) {
+    const { code, question, mode, verify, status, reviewMode, prUrl, githubToken } = useAgentState();
+    const dispatch = useAgentDispatch();
+
     const isRunning = status === "running";
     const canSend = (reviewMode === "pr" ? prUrl.trim() : (code.trim() || question.trim())) && !isRunning;
 
@@ -65,7 +36,7 @@ export default function InputPanel({
                             name="reviewMode"
                             value={t}
                             checked={reviewMode === t}
-                            onChange={() => onReviewModeChange(t)}
+                            onChange={() => dispatch({ type: "SET_REVIEW_MODE", payload: t })}
                             disabled={isRunning}
                         />
                         {t === "code" ? "代码审查" : "PR 审查"}
@@ -86,7 +57,7 @@ export default function InputPanel({
                                 name="mode"
                                 value={m}
                                 checked={mode === m}
-                                onChange={() => onModeChange(m)}
+                                onChange={() => dispatch({ type: "SET_MODE", payload: m })}
                                 disabled={isRunning}
                             />
                             {m === "react" ? "ReAct" : m === "plan-execute" ? "Plan&Execute" : "Reflection"}
@@ -100,7 +71,7 @@ export default function InputPanel({
                 <input
                     type="checkbox"
                     checked={verify}
-                    onChange={(e) => onVerifyChange(e.target.checked)}
+                    onChange={(e) => dispatch({ type: "SET_VERIFY", payload: e.target.checked })}
                     disabled={isRunning}
                 />
                 开启验证（验证环）
@@ -116,7 +87,7 @@ export default function InputPanel({
                         <input
                             type="text"
                             value={prUrl}
-                            onChange={(e) => onPrUrlChange(e.target.value)}
+                            onChange={(e) => dispatch({ type: "SET_PR_URL", payload: e.target.value })}
                             placeholder="https://github.com/owner/repo/pull/123"
                             className="flex h-10 w-full rounded-md border px-3 py-2 text-sm"
                             disabled={isRunning}
@@ -129,7 +100,7 @@ export default function InputPanel({
                         <input
                             type="password"
                             value={githubToken}
-                            onChange={(e) => onGithubTokenChange(e.target.value)}
+                            onChange={(e) => dispatch({ type: "SET_GITHUB_TOKEN", payload: e.target.value })}
                             placeholder="ghp_xxxxxxxxxxxx"
                             className="flex h-10 w-full rounded-md border px-3 py-2 text-sm"
                             disabled={isRunning}
@@ -143,7 +114,7 @@ export default function InputPanel({
                     </label>
                     <Editor
                         value={code}
-                        onValueChange={onCodeChange}
+                        onValueChange={(code) => dispatch({ type: "SET_CODE", payload: code })}
                         highlight={highlight}
                         placeholder="在此粘贴需要审查的代码..."
                         disabled={isRunning}
@@ -165,7 +136,7 @@ export default function InputPanel({
                 </label>
                 <Textarea
                     value={question}
-                    onChange={(e) => onQuestionChange(e.target.value)}
+                    onChange={(e) => dispatch({ type: "SET_QUESTION", payload: e.target.value })}
                     placeholder="例如：分析这段代码的安全漏洞"
                     className="resize-none h-20"
                     disabled={isRunning}

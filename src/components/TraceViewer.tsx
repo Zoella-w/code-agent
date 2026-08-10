@@ -1,6 +1,7 @@
 "use client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import ToolCallCard from "./ToolCallCard";
+import { useAgentState } from "@/context/agent-context";
 
 interface TraceEntry {
     toolName: string;
@@ -18,27 +19,14 @@ interface ToolStep {
     observation?: string;
 }
 
-interface ContextStats {
-    beforeTokens: number;
-    afterTokens: number;
-    compressionRate: string;
-}
-
 interface TraceViewerProps {
     open: boolean;
     onClose: () => void;
-    traces: TraceEntry[];
-    toolSteps: ToolStep[];
-    contextStats: ContextStats | null;
 }
 
-export default function TraceViewer({
-    open,
-    onClose,
-    traces,
-    toolSteps,
-    contextStats,
-}: TraceViewerProps) {
+export default function TraceViewer({ open, onClose }: TraceViewerProps) {
+    // 数据走 Context；open/onClose 是 page 的本地 UI 状态，走 props
+    const { traces, toolSteps, contextStats } = useAgentState();
     const steps = traces.length > 0 ? traces : toolSteps;
 
     return (

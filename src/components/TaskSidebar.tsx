@@ -1,23 +1,20 @@
 "use client";
-import type { Task } from "@/hooks/useAgent";
+import { useAgentState } from "@/context/agent-context";
 
 interface TaskSidebarProps {
-    tasks: Task[];
-    currentTaskId: string | null;
-    disabled: boolean;
     onCreateTask: () => void;
     onSwitchTask: (id: string) => void;
     onDeleteTask: (id: string) => void;
 }
 
 export default function TaskSidebar({
-    tasks,
-    currentTaskId,
-    disabled,
     onCreateTask,
     onSwitchTask,
     onDeleteTask,
 }: TaskSidebarProps) {
+    // 数据走 Context；disabled 是派生状态，组件内部推导
+    const { tasks, currentTaskId, status } = useAgentState();
+    const disabled = status === "running";
     return (
         <div className="h-full flex flex-col border-r" style={{ width: 240 }}>
             <div className="p-3 border-b">

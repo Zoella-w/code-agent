@@ -53,7 +53,7 @@ export interface AgentState {
     githubToken: string;
 }
 
-type AgentAction =
+export type AgentAction =
     | { type: "SET_CODE"; payload: string }
     | { type: "SET_QUESTION"; payload: string }
     | { type: "SET_MODE"; payload: AgentState["mode"] }

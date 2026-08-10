@@ -1,17 +1,10 @@
 "use client";
-import type { VerifyResult } from "@/hooks/useAgent";
 import { getToolMeta, formatArgs } from "./tool-icons";
 import EvalLabeler from "./EvalLabeler";
 import MarkdownRenderer from "./MarkdownRenderer";
+import { useAgentState } from "@/context/agent-context";
 
 interface ResultPanelProps {
-    mainAnswer: string;
-    verifyAnswer: string;
-    verifyResult: VerifyResult | null;
-    status: string;
-    phase: string | null;
-    toolSteps: { step: number; toolName: string; args?: Record<string, unknown>; observation?: string }[];
-    reviewMode: "code" | "pr";
     onOpenTrace: () => void;
     onOpenEval: () => void;
     onRetry: () => void;
@@ -19,18 +12,12 @@ interface ResultPanelProps {
 }
 
 export default function ResultPanel({
-    mainAnswer,
-    verifyAnswer,
-    verifyResult,
-    status,
-    phase,
-    toolSteps,
-    reviewMode,
     onOpenTrace,
     onOpenEval,
     onRetry,
     onPostComment,
 }: ResultPanelProps) {
+    const { mainAnswer, verifyAnswer, verifyResult, status, phase, toolSteps, reviewMode } = useAgentState();
     return (
         <div className="h-full flex flex-col">
             <div className="h-10 border-b flex items-center justify-between px-4" style={{ background: "#f5f5f5" }}>
