@@ -51,6 +51,7 @@ export interface AgentState {
     reviewMode: "code" | "pr";
     prUrl: string;
     githubToken: string;
+    limited: boolean;
 }
 
 export type AgentAction =
@@ -65,6 +66,7 @@ export type AgentAction =
     | { type: "SET_VERIFY_RESULT"; payload: VerifyResult }
     | { type: "FINISH" }
     | { type: "STOP" }
+    | { type: "SET_LIMITED"; payload: boolean }
     | { type: "FAIL"; payload: string }
     | { type: "RESET" }
     | { type: "NEW_TASK"; payload: string }
@@ -91,7 +93,7 @@ function reducer(state: AgentState, action: AgentAction): AgentState {
         case "FAIL":
             return { ...state, status: "error", error: action.payload };
         case "RESET":
-            return { code: "", question: "", mode: "react", verify: false, status: "idle", phase: null, mainAnswer: "", verifyAnswer: "", verifyResult: null, error: "", traces: [], contextStats: null, toolSteps: [], tasks: [], currentTaskId: null, reviewMode: "code" as const, prUrl: "", githubToken: "" };
+            return { code: "", question: "", mode: "react", verify: false, status: "idle", phase: null, mainAnswer: "", verifyAnswer: "", verifyResult: null, error: "", traces: [], contextStats: null, toolSteps: [], tasks: [], currentTaskId: null, reviewMode: "code" as const, prUrl: "", githubToken: "", limited: false };
         case "SET_PHASE":
             return { ...state, phase: action.payload };
         case "DELTA":
@@ -126,6 +128,8 @@ function reducer(state: AgentState, action: AgentAction): AgentState {
         }
         case "STOP":
             return { ...state, status: "idle" };
+        case "SET_LIMITED":
+            return { ...state, limited: action.payload };
         case "NEW_TASK": {
             if (state.status === "running") return state;
             let updatedTasks = state.tasks;
@@ -228,7 +232,7 @@ function reducer(state: AgentState, action: AgentAction): AgentState {
 }
 
 const initialState: AgentState = {
-    code: "", question: "", mode: "react", verify: false, status: "idle", phase: null, mainAnswer: "", verifyAnswer: "", verifyResult: null, error: "", traces: [], contextStats: null, toolSteps: [], tasks: [], currentTaskId: null, reviewMode: "code", prUrl: "", githubToken: "",
+    code: "", question: "", mode: "react", verify: false, status: "idle", phase: null, mainAnswer: "", verifyAnswer: "", verifyResult: null, error: "", traces: [], contextStats: null, toolSteps: [], tasks: [], currentTaskId: null, reviewMode: "code", prUrl: "", githubToken: "", limited: false,
 };
 
 export function useAgent() {
@@ -236,6 +240,41 @@ export function useAgent() {
     const controllerRef = useRef<AbortController | null>(null);
 
     const DEFAULT_QUESTION = "请分析这段代码的安全漏洞和潜在问题";
+
+    // ---- 防滥用限流（前端层）：localStorage 计数即时拦截 + 作者豁免 header ----
+    const USAGE_LIMIT = 3;
+    const USAGE_STORAGE_KEY = "code-agent-requests";
+    const OWNER_STORAGE_KEY = "demo-owner";
+    const USAGE_ERROR_CODE = "USAGE_LIMIT_REACHED";
+
+    const getLocalUsageCount = (): number => {
+        if (typeof window === "undefined") return 0;
+        return Number(localStorage.getItem(USAGE_STORAGE_KEY) ?? 0);
+    };
+    const incrementLocalUsage = (): void => {
+        try {
+            localStorage.setItem(USAGE_STORAGE_KEY, String(getLocalUsageCount() + 1));
+        } catch {
+            /* 隐私模式下 localStorage 不可写，忽略 */
+        }
+    };
+    const getOwnerSecret = (): string | null =>
+        typeof window === "undefined" ? null : localStorage.getItem(OWNER_STORAGE_KEY);
+    const buildHeaders = (): Record<string, string> => {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        const owner = getOwnerSecret();
+        if (owner) headers["x-demo-owner"] = owner;
+        return headers;
+    };
+    /** 发起请求前判断：作者豁免或本地额度未满 → true；否则置 limited 并拦截 */
+    const canIssueRequest = (): boolean => {
+        if (getOwnerSecret()) return true;
+        if (state.limited || getLocalUsageCount() >= USAGE_LIMIT) {
+            dispatch({ type: "SET_LIMITED", payload: true });
+            return false;
+        }
+        return true;
+    };
 
     const sendStream = async () => {
         if (!state.code.trim()) return;
@@ -286,6 +325,7 @@ export function useAgent() {
 
     const sendOrchestrate = async () => {
         if (!state.code.trim() && !state.question.trim()) return;
+        if (!canIssueRequest()) return;
         if (!state.question.trim()) {
             dispatch({ type: "SET_QUESTION", payload: DEFAULT_QUESTION });
         }
@@ -303,6 +343,7 @@ export function useAgent() {
         }
 
         dispatch({ type: "SEND" });
+        if (!getOwnerSecret()) incrementLocalUsage();
 
         const controller = new AbortController();
         controllerRef.current = controller;
@@ -310,7 +351,7 @@ export function useAgent() {
         try {
             const res = await fetch("/api/agent/orchestrate", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: buildHeaders(),
                 body: JSON.stringify({
                     prompt: `${promptQuestion}\n\n代码：\n${state.code}`,
                     mode: state.mode,
@@ -318,7 +359,12 @@ export function useAgent() {
                 }),
                 signal: controller.signal,
             });
-            if (!res.ok || !res.body) throw new Error("编排请求失败");
+            if (!res.ok || !res.body) {
+                const data = await res.json().catch(() => ({ error: "编排请求失败" }));
+                if (data.error === USAGE_ERROR_CODE) dispatch({ type: "SET_LIMITED", payload: true });
+                dispatch({ type: "FAIL", payload: data.message ?? data.error ?? "编排请求失败" });
+                return;
+            }
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
@@ -404,6 +450,7 @@ export function useAgent() {
 
     const sendPRReview = async () => {
         if (!state.prUrl.trim()) return;
+        if (!canIssueRequest()) return;
 
         if (!state.currentTaskId) {
             const res = await fetch("/api/agent/tasks", {
@@ -416,6 +463,7 @@ export function useAgent() {
         }
 
         dispatch({ type: "SEND" });
+        if (!getOwnerSecret()) incrementLocalUsage();
 
         const controller = new AbortController();
         controllerRef.current = controller;
@@ -423,7 +471,7 @@ export function useAgent() {
         try {
             const res = await fetch("/api/agent/pr-review", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: buildHeaders(),
                 body: JSON.stringify({
                     prUrl: state.prUrl,
                     githubToken: state.githubToken || undefined,
@@ -432,8 +480,9 @@ export function useAgent() {
                 signal: controller.signal,
             });
             if (!res.ok || !res.body) {
-                const err = await res.json().catch(() => ({ error: "请求失败" }));
-                dispatch({ type: "FAIL", payload: err.error });
+                const data = await res.json().catch(() => ({ error: "请求失败" }));
+                if (data.error === USAGE_ERROR_CODE) dispatch({ type: "SET_LIMITED", payload: true });
+                dispatch({ type: "FAIL", payload: data.message ?? data.error ?? "请求失败" });
                 return;
             }
 

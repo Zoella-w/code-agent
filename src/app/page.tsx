@@ -13,6 +13,7 @@ export default function Home() {
   const { state, dispatch, sendOrchestrate, stopAgent, sendPRReview, createTask, switchTask, deleteTask, loadTasks } = useAgent();
   const [traceOpen, setTraceOpen] = useState(false);
   const [evalOpen, setEvalOpen] = useState(false);
+  const [postResult, setPostResult] = useState<{ ok: boolean; message: string } | null>(null);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -58,7 +59,7 @@ export default function Home() {
         onDeleteTask={deleteTask}
       />
 
-      <div className="w-[40%] border-r shrink-0">
+      <div className="w-[40%] max-w-[540px] min-w-[380px] border-r shrink-0">
         <InputPanel
           onSend={state.reviewMode === "pr" ? sendPRReview : sendOrchestrate}
           onStop={stopAgent}
@@ -70,6 +71,7 @@ export default function Home() {
           onOpenTrace={() => setTraceOpen(true)}
           onOpenEval={() => setEvalOpen(true)}
           onRetry={state.reviewMode === "pr" ? sendPRReview : sendOrchestrate}
+          postResult={postResult}
           onPostComment={async () => {
             const res = await fetch("/api/agent/pr-comment", {
               method: "POST",
@@ -81,7 +83,10 @@ export default function Home() {
               }),
             });
             const data = await res.json();
-            alert(data.success ? "✅ 评论已发布" : `❌ ${data.error}`);
+            setPostResult({
+              ok: Boolean(data.success),
+              message: data.success ? "评论已发布到 PR" : (data.error || "发布失败"),
+            });
           }}
         />
       </div>
@@ -92,7 +97,7 @@ export default function Home() {
       />
 
       <Sheet open={evalOpen} onOpenChange={(o) => setEvalOpen(o)}>
-        <SheetContent className="w-[500px] sm:max-w-[500px]">
+        <SheetContent className="w-[520px] sm:max-w-[520px]">
           <SheetHeader>
             <SheetTitle>标注样本</SheetTitle>
           </SheetHeader>

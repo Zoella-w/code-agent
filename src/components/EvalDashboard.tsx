@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { EvalSample } from "@/agent/eval-store";
+import { Database, ThumbsUp, ThumbsDown, AlertTriangle, ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Stats {
     total: number;
@@ -8,6 +10,13 @@ interface Stats {
     inaccurate: number;
     partial: number;
 }
+
+const STAT_CARDS = [
+    { key: "total" as const, label: "标注总数", icon: Database, valueClass: "text-foreground" },
+    { key: "accurate" as const, label: "准确", icon: ThumbsUp, valueClass: "text-green-600 dark:text-green-400" },
+    { key: "inaccurate" as const, label: "误报", icon: ThumbsDown, valueClass: "text-destructive" },
+    { key: "partial" as const, label: "部分准确", icon: AlertTriangle, valueClass: "text-amber-600 dark:text-amber-400" },
+];
 
 export default function EvalDashboard() {
     const [samples, setSamples] = useState<EvalSample[]>([]);
@@ -38,54 +47,67 @@ export default function EvalDashboard() {
 
     return (
         <div className="space-y-4">
-            <div className="grid grid-cols-4 gap-2">
-                <div className="bg-muted rounded p-3 text-center">
-                    <div className="text-2xl font-bold">{stats.total}</div>
-                    <div className="text-xs text-muted-foreground">标注总数</div>
+            {/* 统计卡片 */}
+            <div className="grid grid-cols-2 gap-2">
+                {STAT_CARDS.map(({ key, label, icon: Icon, valueClass }) => (
+                    <div key={key} className="rounded-lg border bg-card p-3">
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-1">
+                            <Icon className="size-3" />
+                            {label}
+                        </div>
+                        <div className={cn("text-2xl font-bold leading-none", valueClass)}>
+                            {stats[key]}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* 准确率进度条 */}
+            <div className="rounded-lg border bg-card p-3">
+                <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="font-medium">准确率</span>
+                    <span className="text-muted-foreground">{accuracy}%</span>
                 </div>
-                <div className="bg-green-50 rounded p-3 text-center">
-                    <div className="text-2xl font-bold text-green-600">{stats.accurate}</div>
-                    <div className="text-xs text-muted-foreground">👍 准确</div>
-                </div>
-                <div className="bg-red-50 rounded p-3 text-center">
-                    <div className="text-2xl font-bold text-red-600">{stats.inaccurate}</div>
-                    <div className="text-xs text-muted-foreground">👎 误报</div>
-                </div>
-                <div className="bg-yellow-50 rounded p-3 text-center">
-                    <div className="text-2xl font-bold text-yellow-600">{stats.partial}</div>
-                    <div className="text-xs text-muted-foreground">⚠️ 部分</div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${accuracy}%` }} />
                 </div>
             </div>
 
-            <div className="text-sm text-muted-foreground text-right">
-                准确率：{accuracy}%
-            </div>
-
+            {/* 标注记录 */}
             <div className="space-y-2">
                 <div className="text-sm font-medium text-muted-foreground">标注记录</div>
                 {samples.map((s) => (
-                    <details key={s.id} className="border rounded p-2 text-xs">
-                        <summary className="cursor-pointer flex items-center gap-2">
-                            <span className={s.label === "accurate" ? "text-green-600" : s.label === "inaccurate" ? "text-red-600" : "text-yellow-600"}>
+                    <details key={s.id} className="rounded-lg border bg-card group">
+                        <summary className="cursor-pointer list-none flex items-center gap-2 px-3 py-2 text-xs">
+                            <span
+                                className={cn(
+                                    s.label === "accurate"
+                                        ? "text-green-600 dark:text-green-400"
+                                        : s.label === "inaccurate"
+                                            ? "text-destructive"
+                                            : "text-amber-600 dark:text-amber-400"
+                                )}
+                            >
                                 {s.label === "accurate" ? "👍" : s.label === "inaccurate" ? "👎" : "⚠️"}
                             </span>
-                            <span className="text-muted-foreground">{s.id}</span>
+                            <span className="font-mono text-muted-foreground">{s.id}</span>
                             {s.superseded && (
                                 <span className="text-muted-foreground line-through text-[10px]">已覆盖</span>
                             )}
                             <span className="text-muted-foreground ml-auto">
                                 {new Date(s.timestamp).toLocaleString("zh-CN")}
                             </span>
+                            <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
                         </summary>
-                        <div className="mt-2 space-y-2 pl-4 border-l-2">
+                        <div className="px-3 pb-3 space-y-2 pl-6 border-l-2 ml-3">
                             <div>
-                                <div className="font-medium text-muted-foreground">审查结果</div>
-                                <pre className="whitespace-pre-wrap mt-1">{s.reviewOutput}</pre>
+                                <div className="font-medium text-muted-foreground text-[11px]">审查结果</div>
+                                <pre className="whitespace-pre-wrap mt-1 text-xs font-mono bg-muted/60 rounded-md p-2 overflow-auto">{s.reviewOutput}</pre>
                             </div>
                             {s.verifyOutput && (
                                 <div>
-                                    <div className="font-medium text-muted-foreground">验证报告</div>
-                                    <pre className="whitespace-pre-wrap mt-1">{s.verifyOutput}</pre>
+                                    <div className="font-medium text-muted-foreground text-[11px]">验证报告</div>
+                                    <pre className="whitespace-pre-wrap mt-1 text-xs font-mono bg-muted/60 rounded-md p-2 overflow-auto">{s.verifyOutput}</pre>
                                 </div>
                             )}
                         </div>

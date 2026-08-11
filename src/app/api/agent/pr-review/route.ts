@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createOrchestrateStream } from "@/agent/orchestrate";
+import { checkAndConsumeUsage, USAGE_ERROR_CODE, USAGE_MESSAGE } from "@/lib/usage-limit";
 
 export async function POST(request: NextRequest) {
     const { prUrl, githubToken, verify } = await request.json();
@@ -45,6 +46,15 @@ export async function POST(request: NextRequest) {
     }
 
     const diff = await diffRes.text();
+
+    // 防滥用限流：PR 先拉 diff（不烧 LLM），拉取成功后才计数，diff 无效不占额度
+    const usage = await checkAndConsumeUsage(request);
+    if (!usage.allowed) {
+        return new Response(
+            JSON.stringify({ error: USAGE_ERROR_CODE, message: USAGE_MESSAGE }),
+            { status: 429, headers: { "Content-Type": "application/json" } },
+        );
+    }
 
     const reviewPrompt = [
         "## 任务",

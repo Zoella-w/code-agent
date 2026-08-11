@@ -5,6 +5,9 @@ import {
     CollapsibleTrigger,
     CollapsibleContent,
 } from "@/components/ui/collapsible";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { getToolMeta } from "./tool-icons";
+import { cn } from "@/lib/utils";
 
 /** 单条工具调用记录 */
 interface ToolCallCardProps {
@@ -31,56 +34,43 @@ export default function ToolCallCard({
 }: ToolCallCardProps) {
     // open = true 时展开，open = false 时收起
     const [open, setOpen] = useState(false);
+    const meta = getToolMeta(toolName);
+    const Icon = meta.icon;
 
     return (
-        <Collapsible open={open} onOpenChange={setOpen}>
-
-            {/* CollapsibleTrigger：摘要行，始终可见，点击展开/折叠 */}
+        <Collapsible open={open} onOpenChange={setOpen} className="rounded-lg border bg-card overflow-hidden">
+            {/* 摘要行：始终可见，点击展开/折叠 */}
             <CollapsibleTrigger
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-xs hover:bg-muted/50
-  transition-colors ${open ? "bg-muted/50" : ""}`}
+                className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs transition-colors hover:bg-muted/60",
+                    open && "bg-muted/40"
+                )}
             >
-                {/* 状态指示灯：绿色点 = 成功，红色点 = 失败 */}
-                <span
-                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${success ? "bg-green-500" : "bg-red-500"}`}
-                />
-
-                {/* 工具名 */}
+                {/* 状态指示灯：绿色 = 成功，红色 = 失败 */}
+                <span className={cn("size-1.5 rounded-full shrink-0", success ? "bg-green-500" : "bg-destructive")} />
+                <Icon className="size-3.5 text-muted-foreground shrink-0" />
                 <span className="font-medium">{toolName}</span>
-
-                {/* 耗时 */}
-                <span className="text-muted-foreground">
-                    {formatDuration(durationMs)}
-                </span>
-
-                {/* 结果预览：超长自动截断加省略号 */}
-                {/* truncate：文本太长时用 ... 截断 */}
-                <span className="flex-1 text-muted-foreground truncate text-right">
-                    {contentPreview}
-                </span>
-
-                {/* 展开/收起提示 */}
-                <span className="text-muted-foreground text-xs shrink-0">
-                    {open ? "收起 ▲" : "展开 ▼"}
-                </span>
+                <span className="text-muted-foreground shrink-0">{formatDuration(durationMs)}</span>
+                <span className="flex-1 text-muted-foreground truncate text-right">{contentPreview}</span>
+                {open ? (
+                    <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
+                ) : (
+                    <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />
+                )}
             </CollapsibleTrigger>
 
-            {/* 折叠内容：展开后显示参数 + 完整结果 */}
-            {/* CollapsibleContent：在折叠时 display: none，展开时正常渲染 */}
+            {/* 展开内容：参数 + 完整结果 */}
             <CollapsibleContent>
-                <div className="px-3 py-2 space-y-2 text-xs">
-                    {/* 参数 */}
+                <div className="px-3 pb-3 space-y-2 text-xs border-t pt-2">
                     <div>
                         <span className="font-medium text-muted-foreground">参数: </span>
-                        <code className="bg-muted px-1 py-0.5 rounded text-xs">
+                        <code className="bg-muted px-1.5 py-0.5 rounded text-[11px] font-mono">
                             {JSON.stringify(args)}
                         </code>
                     </div>
-
-                    {/* 结果 */}
                     <div>
                         <span className="font-medium text-muted-foreground">结果: </span>
-                        <pre className="mt-1 whitespace-pre-wrap text-xs bg-muted p-2 rounded-md max-h-32 overflow-auto">
+                        <pre className="mt-1 whitespace-pre-wrap text-[11px] font-mono bg-muted/60 p-2 rounded-md max-h-32 overflow-auto">
                             {contentPreview}
                         </pre>
                     </div>

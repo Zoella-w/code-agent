@@ -42,3 +42,10 @@ model PrReview {
   commentPosted  Boolean  @default(false)
   createdAt      DateTime @default(now())
 }
+
+/** 防滥用限流：按限流键（IP / 设备）累计 LLM 请求次数 */
+model UsageLimit {
+  key       String   @id
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
