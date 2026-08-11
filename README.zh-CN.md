@@ -4,7 +4,7 @@
 
 从零手写的团队代码审查 Agent 平台，TypeScript 全栈实现。支持三种 Agentic 架构（ReAct / Plan & Execute / Reflection）、异步 PR 审查、人在环评估标注、SSE 流式输出。
 
-> **在线地址**：[code-agent-rosy.vercel.app](https://code-agent-rosy.vercel.app)
+> **在线地址**：[code-agent-j3fznqof2-zoella-ws-projects.vercel.app](https://code-agent-j3fznqof2-zoella-ws-projects.vercel.app)
 
 ## 架构总览
 
