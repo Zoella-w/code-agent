@@ -4,7 +4,7 @@
 
 A team-oriented code review agent platform built from scratch with TypeScript. Supports three agentic architectures (ReAct / Plan & Execute / Reflection), asynchronous PR review, human-in-the-loop evaluation, and streaming SSE output.
 
-> **Live Demo**: [code-agent-j3fznqof2-zoella-ws-projects.vercel.app](https://code-agent-j3fznqof2-zoella-ws-projects.vercel.app)
+> **Live Demo**: [code-agent-rosy.vercel.app](https://code-agent-rosy.vercel.app)
 
 ## Architecture
 
